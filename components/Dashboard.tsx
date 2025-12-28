@@ -30,6 +30,8 @@ export const Dashboard: React.FC = () => {
   
   // Refresher Specific Filters
   const [selectedIndicator, setSelectedIndicator] = useState<string>('all');
+  const [selectedOperator, setSelectedOperator] = useState<string>('all');
+  const [selectedRefresherInstructor, setSelectedRefresherInstructor] = useState<string>('all');
   
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   
@@ -61,12 +63,14 @@ export const Dashboard: React.FC = () => {
     setStudentFilter('all');
     setInstructorFilter('all');
     setSelectedIndicator('all');
+    setSelectedOperator('all');
+    setSelectedRefresherInstructor('all');
     setCurrentPage(1);
   }, [data?.className]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [studentFilter, instructorFilter, selectedIndicator]);
+  }, [studentFilter, instructorFilter, selectedIndicator, selectedOperator, selectedRefresherInstructor]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -431,31 +435,46 @@ export const Dashboard: React.FC = () => {
     return Array.from(new Set(refresherRecords.map(r => r.indicator))).sort();
   }, [refresherRecords]);
 
+  const refresherOperators = useMemo(() => {
+    return Array.from(new Set(refresherRecords.map(r => r.name))).sort();
+  }, [refresherRecords]);
+
+  const refresherInstructors = useMemo(() => {
+    return Array.from(new Set(refresherRecords.map(r => r.instructor))).sort();
+  }, [refresherRecords]);
+
+  const filteredRefresherRecords = useMemo(() => {
+     let recs = refresherRecords;
+     if (selectedIndicator !== 'all') {
+         recs = recs.filter(r => r.indicator === selectedIndicator);
+     }
+     if (selectedOperator !== 'all') {
+         recs = recs.filter(r => r.name === selectedOperator);
+     }
+     if (selectedRefresherInstructor !== 'all') {
+         recs = recs.filter(r => r.instructor === selectedRefresherInstructor);
+     }
+     return recs;
+  }, [refresherRecords, selectedIndicator, selectedOperator, selectedRefresherInstructor]);
+
   // Enhanced Refresher Chart Data Logic
   const refresherChartData = useMemo(() => {
-      if (selectedIndicator === 'all') {
-          // Aggregate by Indicator to show summarized impact
-          const grouped: Record<string, { totalPre: number, totalPost: number, totalTarget: number, count: number }> = {};
-          refresherRecords.forEach(r => {
-              if (!grouped[r.indicator]) grouped[r.indicator] = { totalPre: 0, totalPost: 0, totalTarget: 0, count: 0 };
-              grouped[r.indicator].totalPre += r.preResult;
-              grouped[r.indicator].totalPost += r.postResult;
-              grouped[r.indicator].totalTarget += r.target;
-              grouped[r.indicator].count++;
-          });
-          
-          return Object.keys(grouped).map(ind => ({
-              name: ind,
-              preResult: grouped[ind].totalPre / grouped[ind].count,
-              postResult: grouped[ind].totalPost / grouped[ind].count,
-              target: grouped[ind].totalTarget / grouped[ind].count,
-              isAggregate: true
+      // Case 1: Specific Operator selected (Compare their indicators)
+      if (selectedOperator !== 'all') {
+          return filteredRefresherRecords.map(r => ({
+              name: r.indicator, // X-Axis becomes the Indicator Name
+              preResult: r.preResult,
+              postResult: r.postResult,
+              target: r.target,
+              isAggregate: false,
+              fullName: r.name // For tooltip
           }));
-      } else {
-          // Show individual operators for the selected indicator, sorted by largest gap closure or improvement
-          return refresherRecords
-            .filter(r => r.indicator === selectedIndicator)
-            // Sort by absolute improvement
+      }
+
+      // Case 2: All Operators, Specific Indicator (Compare operators on this indicator)
+      if (selectedIndicator !== 'all') {
+          // Show individual operators for the selected indicator
+          return filteredRefresherRecords
             .sort((a,b) => (b.postResult - b.preResult) - (a.postResult - a.preResult))
             .slice(0, 30) // Limit to top 30 for clarity
             .map(r => ({
@@ -467,12 +486,30 @@ export const Dashboard: React.FC = () => {
                 isAggregate: false
             }));
       }
-  }, [refresherRecords, selectedIndicator]);
 
-  const filteredRefresherRecords = useMemo(() => {
-     if (selectedIndicator === 'all') return refresherRecords;
-     return refresherRecords.filter(r => r.indicator === selectedIndicator);
-  }, [refresherRecords, selectedIndicator]);
+      // Case 3: All Operators, All Indicators (Aggregated View)
+      // Aggregate by Indicator to show summarized impact
+      const grouped: Record<string, { totalPre: number, totalPost: number, totalTarget: number, count: number }> = {};
+      // Use filtered records so it respects the instructor filter if applied
+      const baseRecords = filteredRefresherRecords; 
+      
+      baseRecords.forEach(r => {
+          if (!grouped[r.indicator]) grouped[r.indicator] = { totalPre: 0, totalPost: 0, totalTarget: 0, count: 0 };
+          grouped[r.indicator].totalPre += r.preResult;
+          grouped[r.indicator].totalPost += r.postResult;
+          grouped[r.indicator].totalTarget += r.target;
+          grouped[r.indicator].count++;
+      });
+      
+      return Object.keys(grouped).map(ind => ({
+          name: ind,
+          preResult: grouped[ind].totalPre / grouped[ind].count,
+          postResult: grouped[ind].totalPost / grouped[ind].count,
+          target: grouped[ind].totalTarget / grouped[ind].count,
+          isAggregate: true
+      }));
+
+  }, [filteredRefresherRecords, selectedIndicator, selectedOperator]); // Removed refresherRecords from dep array as filtered handles it
 
   const refresherStats = useMemo(() => {
       const total = filteredRefresherRecords.length;
@@ -720,7 +757,7 @@ export const Dashboard: React.FC = () => {
             {/* CONTROL BAR */}
             <div className="bg-white p-2 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-2 items-center no-pdf">
                <div className="flex items-center gap-3 bg-emerald-50 px-4 py-3 rounded-xl border border-emerald-100 flex-1 w-full md:max-w-md">
-                  <i className="fas fa-filter text-emerald-600"></i>
+                  <i className="fas fa-chart-line text-emerald-600"></i>
                   <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Filtrar Indicador:</span>
                   <select 
                     className="bg-transparent border-none w-full text-sm font-bold outline-none focus:ring-0 cursor-pointer text-emerald-900"
@@ -733,8 +770,43 @@ export const Dashboard: React.FC = () => {
                     ))}
                   </select>
                </div>
-               <div className="text-xs font-bold text-slate-400 px-4">
-                  Exibindo {recs.length} registros filtrados
+
+               <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
+
+               <div className="flex items-center gap-3 bg-emerald-50 px-4 py-3 rounded-xl border border-emerald-100 flex-1 w-full md:max-w-md">
+                  <i className="fas fa-chalkboard-teacher text-emerald-600"></i>
+                  <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Instrutor:</span>
+                  <select 
+                    className="bg-transparent border-none w-full text-sm font-bold outline-none focus:ring-0 cursor-pointer text-emerald-900"
+                    value={selectedRefresherInstructor}
+                    onChange={(e) => setSelectedRefresherInstructor(e.target.value)}
+                  >
+                    <option value="all">Todos os Instrutores</option>
+                    {refresherInstructors.map(inst => (
+                      <option key={inst} value={inst}>{inst}</option>
+                    ))}
+                  </select>
+               </div>
+
+               <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
+
+               <div className="flex items-center gap-3 bg-emerald-50 px-4 py-3 rounded-xl border border-emerald-100 flex-1 w-full md:max-w-md">
+                  <i className="fas fa-user text-emerald-600"></i>
+                  <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Operador:</span>
+                  <select 
+                    className="bg-transparent border-none w-full text-sm font-bold outline-none focus:ring-0 cursor-pointer text-emerald-900"
+                    value={selectedOperator}
+                    onChange={(e) => setSelectedOperator(e.target.value)}
+                  >
+                    <option value="all">Todos os Operadores</option>
+                    {refresherOperators.map(op => (
+                      <option key={op} value={op}>{op}</option>
+                    ))}
+                  </select>
+               </div>
+
+               <div className="text-xs font-bold text-slate-400 px-4 whitespace-nowrap">
+                  {recs.length} reg.
                </div>
             </div>
 
@@ -779,9 +851,13 @@ export const Dashboard: React.FC = () => {
                        <div>
                           <h3 className="font-bold text-slate-900 text-lg">Análise de Impacto Operacional</h3>
                           <p className="text-xs text-slate-500 mt-1">
-                             {selectedIndicator === 'all' 
-                              ? 'Médias consolidadas por Tipo de Indicador' 
-                              : `Performance individual: ${selectedIndicator} (Top 30 Evolução)`}
+                             {selectedOperator !== 'all' 
+                              ? `Performance Individual: ${selectedOperator}`
+                              : (selectedIndicator === 'all' 
+                                  ? 'Médias consolidadas por Tipo de Indicador' 
+                                  : `Performance individual: ${selectedIndicator} (Top 30 Evolução)`
+                                )
+                             }
                           </p>
                        </div>
                     </div>
